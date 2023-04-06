@@ -168,7 +168,7 @@ impl<C: config::Config> GitTogether<C> {
 
         self.save_original_user()?;
         if let Some(author) = authors.get(0) {
-            self.set_user(&author.name, &author.email)?;
+            self.set_user(&author.name, &author.email, &author.gpg, &author.ssh)?;
         }
 
         Ok(authors)
@@ -179,6 +179,10 @@ impl<C: config::Config> GitTogether<C> {
 
         let _ = self.config.clear("user.name");
         let _ = self.config.clear("user.email");
+        let _ = self.config.clear("user.signingkey");
+        let _ = self.config.clear("core.sshCommand");
+
+//        # git config core.sshCommand "ssh -o IdentitiesOnly=yes -i ~/.ssh/private-key-filename-for-this-repository -F /dev/null"
 
         Ok(())
     }
@@ -200,12 +204,37 @@ impl<C: config::Config> GitTogether<C> {
                 .or_else(|_| self.config.set(&key, &email))?;
         }
 
-        Ok(())
+        if let Ok(gpg) = self.config.get("user.signingkey") {
+            let key = namespaced("user.signingkey");
+            self.config
+                .get(&key)
+                .map(|_| ())
+                .or_else(|_| self.config.set(&key, &gpg))?;
+        }
+
+//        # git config core.sshCommand "ssh -o IdentitiesOnly=yes -i ~/.ssh/private-key-filename-for-this-repository -F /dev/null"
+        if let Ok(ssh) = self.config.get("core.sshCommand") {
+            let key = namespaced("core.sshCommand");
+            let result = format!("ssh -o IdentitiesOnly=yes -i ~/.ssh/{} -F /dev/null", ssh);
+            self.config
+                .get(&key)
+                .map(|_| ())
+                .or_else(|_| self.config.set(&key, &result ))?;
+        }
+
+         Ok(())
     }
 
-    fn set_user(&mut self, name: &str, email: &str) -> Result<()> {
+    fn set_user(&mut self, name: &str, email: &str, gpg: &str, ssh: &str) -> Result<()> {
         self.config.set("user.name", name)?;
         self.config.set("user.email", email)?;
+        if gpg != "" {
+            self.config.set("user.signingkey", gpg)?;
+        }
+        if ssh!= "" {
+            let result = format!("ssh -o IdentitiesOnly=yes -i ~/.ssh/{} -F /dev/null", ssh);
+            self.config.set("core.sshCommand", &result)?;
+        }
 
         Ok(())
     }
@@ -315,10 +344,10 @@ mod tests {
         let config = MockConfig::new(&[
             ("git-together.authors.jh", ""),
             ("git-together.authors.nn", "Naomi Nagata"),
-            ("git-together.authors.ab", "Amos Burton; aburton"),
+            ("git-together.authors.ab", "Amos Burton; aburton; 5BBAE5B5; id_rsa_ab"),
             ("git-together.authors.ak", "Alex Kamal; akamal"),
-            ("git-together.authors.ca", "Chrisjen Avasarala;"),
-            ("git-together.authors.bd", "Bobbie Draper; bdraper@mars.mil"),
+            ("git-together.authors.ca", "Chrisjen Avasarala; ; 1F0B34A7"),
+            ("git-together.authors.bd", "Bobbie Draper; bdraper@mars.mil; 7F4B535E; id_rsa_bd"),
             (
                 "git-together.authors.jm",
                 "Joe Miller; jmiller@starhelix.com",
@@ -343,10 +372,14 @@ mod tests {
                 Author {
                     name: "Amos Burton".into(),
                     email: "aburton@rocinante.com".into(),
+                    gpg: "5BBAE5B5".into(),
+                    ssh: "id_rsa_ab".into(),
                 },
                 Author {
                     name: "Alex Kamal".into(),
                     email: "akamal@rocinante.com".into(),
+                    gpg: "".into(),
+                    ssh: "".into(),
                 }
             ]
         );
@@ -356,14 +389,20 @@ mod tests {
                 Author {
                     name: "Amos Burton".into(),
                     email: "aburton@rocinante.com".into(),
+                    gpg: "5BBAE5B5".into(),
+                    ssh: "id_rsa_ab".into()
                 },
                 Author {
                     name: "Bobbie Draper".into(),
                     email: "bdraper@mars.mil".into(),
+                    gpg: "7F4B535E".into(),
+                    ssh: "id_rsa_bd".into(),
                 },
                 Author {
                     name: "Joe Miller".into(),
                     email: "jmiller@starhelix.com".into(),
+                    gpg: "".into(),
+                    ssh: "".into(),
                 }
             ]
         );
@@ -372,10 +411,11 @@ mod tests {
     #[test]
     fn set_active_solo() {
         let config = MockConfig::new(&[
-            ("git-together.authors.jh", "James Holden; jholden"),
-            ("git-together.authors.nn", "Naomi Nagata; nnagata"),
+            ("git-together.authors.jh", "James Holden; jholden; 82C1192E"),
+            ("git-together.authors.nn", "Naomi Nagata; nnagata; ; id_rsa_nn"),
             ("user.name", "Bobbie Draper"),
             ("user.email", "bdraper@mars.mil"),
+            ("user.signingkey", ""),
         ]);
         let author_parser = AuthorParser {
             domain: Some("rocinante.com".into()),
@@ -389,17 +429,20 @@ mod tests {
         assert_eq!(gt.get_active().unwrap(), vec!["jh"]);
         assert_eq!(gt.config["user.name"], "James Holden");
         assert_eq!(gt.config["user.email"], "jholden@rocinante.com");
+        assert_eq!(gt.config["user.signingkey"], "82C1192E");
         assert_eq!(gt.config["git-together.user.name"], "Bobbie Draper");
         assert_eq!(gt.config["git-together.user.email"], "bdraper@mars.mil");
+        assert_eq!(gt.config["git-together.user.signingkey"], "");
     }
 
     #[test]
     fn set_active_pair() {
         let config = MockConfig::new(&[
-            ("git-together.authors.jh", "James Holden; jholden"),
+            ("git-together.authors.jh", "James Holden; jholden; 82C1192E"),
             ("git-together.authors.nn", "Naomi Nagata; nnagata"),
             ("user.name", "Bobbie Draper"),
             ("user.email", "bdraper@mars.mil"),
+            ("user.signingkey", ""),
         ]);
         let author_parser = AuthorParser {
             domain: Some("rocinante.com".into()),
@@ -413,14 +456,16 @@ mod tests {
         assert_eq!(gt.get_active().unwrap(), vec!["nn", "jh"]);
         assert_eq!(gt.config["user.name"], "Naomi Nagata");
         assert_eq!(gt.config["user.email"], "nnagata@rocinante.com");
+        assert_eq!(gt.config["user.signingkey"], "");
         assert_eq!(gt.config["git-together.user.name"], "Bobbie Draper");
         assert_eq!(gt.config["git-together.user.email"], "bdraper@mars.mil");
+        assert_eq!(gt.config["git-together.user.signingkey"], "");
     }
 
     #[test]
     fn clear_active_pair() {
         let config = MockConfig::new(&[
-            ("git-together.authors.jh", "James Holden; jholden"),
+            ("git-together.authors.jh", "James Holden; jholden; 82C1192E"),
             ("git-together.authors.nn", "Naomi Nagata; nnagata"),
             ("user.name", "Bobbie Draper"),
             ("user.email", "bdraper@mars.mil"),
@@ -438,6 +483,7 @@ mod tests {
         assert!(gt.get_active().is_err());
         assert!(gt.config.get("user.name").is_err());
         assert!(gt.config.get("user.email").is_err());
+        assert!(gt.config.get("user.signingkey").is_err());
     }
 
     #[test]
@@ -447,6 +493,7 @@ mod tests {
             ("git-together.authors.nn", "Naomi Nagata; nnagata"),
             ("user.name", "Bobbie Draper"),
             ("user.email", "bdraper@mars.mil"),
+            ("user.signingkey", "F32FAF9A"),
         ]);
         let author_parser = AuthorParser {
             domain: Some("rocinante.com".into()),
@@ -460,6 +507,7 @@ mod tests {
         gt.set_active(&["jh"]).unwrap();
         assert_eq!(gt.config["git-together.user.name"], "Bobbie Draper");
         assert_eq!(gt.config["git-together.user.email"], "bdraper@mars.mil");
+        assert_eq!(gt.config["git-together.user.signingkey"], "F32FAF9A");
     }
 
     #[test]
@@ -485,11 +533,11 @@ mod tests {
     fn all_authors() {
         let config = MockConfig::new(&[
             ("git-together.active", "jh+nn"),
-            ("git-together.authors.ab", "Amos Burton; aburton"),
-            ("git-together.authors.bd", "Bobbie Draper; bdraper@mars.mil"),
+            ("git-together.authors.ab", "Amos Burton; aburton; 5BBAE5B5; id_rsa_ab"),
+            ("git-together.authors.bd", "Bobbie Draper; bdraper@mars.mil; F32FAF9A; id_rsa_bd"),
             (
                 "git-together.authors.jm",
-                "Joe Miller; jmiller@starhelix.com",
+                "Joe Miller; jmiller@starhelix.com; 1F0B34A7",
             ),
         ]);
         let author_parser = AuthorParser {
@@ -507,6 +555,8 @@ mod tests {
             Author {
                 name: "Amos Burton".into(),
                 email: "aburton@rocinante.com".into(),
+                gpg: "5BBAE5B5".into(),
+                ssh: "id_rsa_ab".into(),
             }
         );
         assert_eq!(
@@ -514,6 +564,8 @@ mod tests {
             Author {
                 name: "Bobbie Draper".into(),
                 email: "bdraper@mars.mil".into(),
+                gpg: "F32FAF9A".into(),
+                ssh: "id_rsa_bd".into(),
             }
         );
         assert_eq!(
@@ -521,6 +573,8 @@ mod tests {
             Author {
                 name: "Joe Miller".into(),
                 email: "jmiller@starhelix.com".into(),
+                gpg: "1F0B34A7".into(),
+                ssh: "".into(),
             }
         );
     }

@@ -6,6 +6,8 @@ use crate::errors::*;
 pub struct Author {
     pub name: String,
     pub email: String,
+    pub gpg: String,
+    pub ssh: String,
 }
 
 pub struct AuthorParser {
@@ -42,16 +44,35 @@ impl AuthorParser {
             format!("{}@{}", email_seed, domain)
         };
 
+        let gpg = match split.next() {
+            Some(gpg) if !gpg.is_empty() => gpg,
+            _ => ""
+        };
+
+        let ssh= match split.next() {
+            Some(ssh) if !ssh.is_empty() => ssh,
+            _ => ""
+        };
+
         Ok(Author {
             name: name.into(),
             email,
+            gpg: gpg.into(),
+            ssh: ssh.into(),
         })
     }
 }
 
 impl fmt::Display for Author {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} <{}>", self.name, self.email)
+        write!(f, "{} <{}>", self.name, self.email).unwrap();
+        if self.gpg != "" {
+            write!(f, " gpg:{}", self.gpg).unwrap();
+        }
+        if self.ssh!= "" {
+            write!(f, " ssh:{}", self.ssh).unwrap();
+        }
+        Ok(())
     }
 }
 
@@ -83,5 +104,27 @@ mod tests {
             .unwrap();
         assert_eq!(author.name, "Jane Doe");
         assert_eq!(author.email, "jane.doe@example.edu");
+
+        let author = author_parser
+            .parse("Jane Doe; jane.doe@example.edu; B87A4EFD")
+            .unwrap();
+        assert_eq!(author.name, "Jane Doe");
+        assert_eq!(author.email, "jane.doe@example.edu");
+        assert_eq!(author.gpg, "B87A4EFD");
+
+        let author = author_parser
+            .parse("Jane Doe; jane.doe@example.edu; ;")
+            .unwrap();
+        assert_eq!(author.name, "Jane Doe");
+        assert_eq!(author.email, "jane.doe@example.edu");
+        assert_eq!(author.gpg, "");
+
+        let author = author_parser
+            .parse("Jane Doe; jane.doe@example.edu; ; id_rsa")
+            .unwrap();
+        assert_eq!(author.name, "Jane Doe");
+        assert_eq!(author.email, "jane.doe@example.edu");
+        assert_eq!(author.gpg, "");
+        assert_eq!(author.ssh, "id_rsa");
     }
 }
