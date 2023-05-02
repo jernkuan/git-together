@@ -107,13 +107,12 @@ pub fn run() -> Result<i32> {
         let mut cmd = Command::new("git");
         let cmd = cmd.args(global_args);
         let cmd = cmd.arg(command);
+        // rotate before signoff, as we don't want to change committer and author, as it's required for push
+        gt.rotate_active()?;
         let cmd = gt.signoff(cmd)?;
         let cmd = cmd.args(command_args);
 
         let status = cmd.status().chain_err(|| "failed to execute process")?;
-        if status.success() {
-            gt.rotate_active()?;
-        }
         status.code().ok_or("process terminated by signal")?
     } else {
         let status = Command::new("git")
@@ -181,8 +180,6 @@ impl<C: config::Config> GitTogether<C> {
         let _ = self.config.clear("user.email");
         let _ = self.config.clear("user.signingkey");
         let _ = self.config.clear("core.sshCommand");
-
-//        # git config core.sshCommand "ssh -o IdentitiesOnly=yes -i ~/.ssh/private-key-filename-for-this-repository -F /dev/null"
 
         Ok(())
     }
@@ -269,7 +266,7 @@ impl<C: config::Config> GitTogether<C> {
         let inits: Vec<_> = active.split('+').collect();
         let authors = self.get_authors(&inits)?;
 
-        let (author, committer) = match *authors.as_slice() {
+        let (committer, author) = match *authors.as_slice() {
             [] => {
                 return Err("".into());
             }
